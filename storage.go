@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/certmagic"
 	consul "github.com/hashicorp/consul/api"
 	"github.com/pteich/errors"
@@ -314,3 +316,9 @@ func ConsulQueryDefaults(ctx context.Context) *consul.QueryOptions {
 	}
 	return opts.WithContext(ctx)
 }
+
+// Interface guards
+var (
+	_ caddy.StorageConverter = (*ConsulStorage)(nil)
+	_ caddyfile.Unmarshaler  = (*ConsulStorage)(nil)
+)
