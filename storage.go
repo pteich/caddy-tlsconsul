@@ -24,7 +24,7 @@ type ConsulStorage struct {
 	ConsulClient *consul.Client
 	logger       *zap.SugaredLogger
 	muLocks      *sync.RWMutex
-	locks        map[string]*consul.Lock
+	locks        map[string]*consulLock
 
 	Address     string `json:"address"`
 	Token       string `json:"token"`
@@ -36,11 +36,16 @@ type ConsulStorage struct {
 	TlsInsecure bool   `json:"tls_insecure"`
 }
 
+type consulLock struct {
+	lock   *consul.Lock
+	cancel chan struct{}
+}
+
 // New connects to Consul and returns a ConsulStorage
 func New() *ConsulStorage {
 	// create ConsulStorage and pre-set values
 	s := ConsulStorage{
-		locks:       make(map[string]*consul.Lock),
+		locks:       make(map[string]*consulLock),
 		AESKey:      []byte(DefaultAESKey),
 		ValuePrefix: DefaultValuePrefix,
 		Prefix:      DefaultPrefix,
@@ -80,24 +85,33 @@ func (cs *ConsulStorage) Lock(ctx context.Context, key string) error {
 		return errors.Wrapf(err, "unable to lock %s", cs.prefixKey(key))
 	}
 
+	// Create the cancel channel and consulLock struct
+	cancel := make(chan struct{})
+	cl := consulLock{lock: lock, cancel: cancel}
+
 	// auto-unlock and clean list of locks in case of lost
 	go func() {
-		<-lockActive
-		err := cs.Unlock(ctx, key)
-		if err != nil {
-			cs.logger.Errorf("failed to release lock: %s", err)
+		select {
+		case <-lockActive:
+			// We lost the lock, cleanup
+			cs.muLocks.Lock()
+			delete(cs.locks, key)
+			cs.muLocks.Unlock()
+		case <-cancel:
+			// We released the lock, this can go away
+			return
 		}
 	}()
 
 	// save the lock
 	cs.muLocks.Lock()
-	cs.locks[key] = lock
+	cs.locks[key] = &cl
 	cs.muLocks.Unlock()
 
 	return nil
 }
 
-func (cs *ConsulStorage) GetLock(key string) (*consul.Lock, bool) {
+func (cs *ConsulStorage) GetLock(key string) (*consulLock, bool) {
 	cs.muLocks.RLock()
 	defer cs.muLocks.RUnlock()
 
@@ -117,8 +131,16 @@ func (cs *ConsulStorage) Unlock(_ context.Context, key string) error {
 		return errors.Errorf("lock %s not found", cs.prefixKey(key))
 	}
 
-	err := lock.Unlock()
+	close(lock.cancel)
+	err := lock.lock.Unlock()
 	if err != nil {
+		// TODO: what do we do here with the original cleanup goroutine
+		// in Lock --- we have to close lock.cancel before we ask for
+		// the Unlock, otherwise we'll trigger an extra cleanup. But
+		// the unlock failed on the Consul side for some reason, the
+		// lock may still exist, we haven't removed it from our locak
+		// notion of what locks we hold, and what if Consul cancels
+		// the lock on us, we won't clean up then....
 		return errors.Wrapf(err, "unable to unlock %s", cs.prefixKey(key))
 	}
 
