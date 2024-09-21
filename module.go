@@ -1,8 +1,10 @@
 package storageconsul
 
 import (
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -118,6 +120,25 @@ func (cs *ConsulStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				tlsInsecureParse, err := strconv.ParseBool(value)
 				if err == nil {
 					cs.TlsInsecure = tlsInsecureParse
+				}
+			}
+		case "url":
+			if value != "" {
+				consulurl, err := url.Parse(value)
+				if err == nil {
+					if consulurl.Scheme == "https" {
+						cs.TlsEnabled = true
+					} else {
+						cs.TlsEnabled = false
+					}
+					if consulurl.Host != "" {
+						cs.Address = caddy.JoinNetworkAddress("", consulurl.Hostname(), consulurl.Port())
+					}
+					password, isset := consulurl.User.Password()
+					if isset {
+						cs.Token = password
+					}
+					cs.Prefix = strings.TrimPrefix(consulurl.Path, "/")
 				}
 			}
 		}

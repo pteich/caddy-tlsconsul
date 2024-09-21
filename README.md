@@ -66,6 +66,17 @@ Caddyfile ([reference](https://caddyserver.com/docs/caddyfile/options))
 }
 ```
 
+Several of the above properties can be condensed into a `url`:
+```
+    storage consul {
+           url          "http://:consul-access-token@127.0.0.1:8500/caddytls"
+           timeout      10
+           value_prefix "myprefix"
+           aes_key      "consultls-1234567890-caddytls-32"
+           tls_insecure "true"
+    }
+```
+
 ### Consul configuration
 
 Because this plugin uses the official Consul API client you can use all ENV variables like `CONSUL_HTTP_ADDR` or `CONSUL_HTTP_TOKEN`
