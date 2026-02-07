@@ -72,7 +72,7 @@ func (cs *ConsulStorage) Lock(ctx context.Context, key string) error {
 	lock, err := cs.ConsulClient.LockOpts(&consul.LockOptions{
 		Key:          cs.prefixKey(key),
 		LockWaitTime: time.Duration(cs.Timeout) * time.Second,
-		LockTryOnce:  true,
+		LockTryOnce:  false,
 	})
 	if err != nil {
 		return fmt.Errorf("could not create lock for %s: %w", cs.prefixKey(key), err)
@@ -84,10 +84,15 @@ func (cs *ConsulStorage) Lock(ctx context.Context, key string) error {
 		return fmt.Errorf("unable to lock %s: %w", cs.prefixKey(key), err)
 	}
 
+	// nil channel means lock was not acquired (e.g. context cancelled)
+	if lockActive == nil {
+		return fmt.Errorf("failed to acquire lock for %s: lock not held", cs.prefixKey(key))
+	}
+
 	// auto-unlock and clean list of locks in case of lost
 	go func() {
 		<-lockActive
-		err := cs.Unlock(ctx, key)
+		err := cs.Unlock(context.Background(), key)
 		if err != nil && !errors.Is(err, ErrLockNotFound) {
 			cs.logger.Errorf("failed to release lock: %s", err)
 		}
@@ -316,7 +321,7 @@ func (cs *ConsulStorage) createConsulClient() error {
 func ConsulQueryDefaults(ctx context.Context) *consul.QueryOptions {
 	opts := &consul.QueryOptions{
 		UseCache:          false,
-		RequireConsistent: false,
+		RequireConsistent: true,
 	}
 	return opts.WithContext(ctx)
 }
